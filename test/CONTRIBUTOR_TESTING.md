@@ -4,6 +4,40 @@ These tests build on the accepted unit tests, behavioral Graph A mocks, historic
 runtime/storage replay, and variable-supply reserve invariant. Production code,
 dependencies, ABI exports, launch artifacts and Foundry configuration are unchanged.
 
+## Revision for the burn floor, merge supply guard and Core-pause exits
+
+The implementation now takes `merge(survivorId, donorId, maxSupply)`, refuses burns
+below `totalWeight * MIN_SHARES_PER_WEIGHT`, lets transfers and burns proceed on
+funded state while Core is paused, pins Graph A identity only for `activate` and
+`merge`, and refuses `renounceOwnership` before activation. These tests were
+adjusted only where those changes require it:
+
+- Every merge passes the supply read *before* `vm.prank`, so the prank reaches
+  `merge` rather than the `totalSupply()` argument.
+- The paused-Core rollback case now asserts the new split: deposit and merge
+  revert `CheckpointRequired` with an unchanged fingerprint and no checkpoint;
+  transfer, delegated transfer and burn succeed and harvest only the funded round;
+  the round certified during the pause is funded to the holders at funding time.
+  New cases cover a paused Core with no certified round (admissions proceed) and
+  paused exits that still roll back atomically on a failing or misreported claim.
+- `ShareArithmetic.t.sol` burns only down to the floor, asserts every later quote
+  is at least `weight * 1e9`, and its uint128 reward boundary now starts at the
+  floor supply, checking both `InvalidExit` and `SupplyBelowFloor` boundaries.
+- `FloorPauseGuardInvariant.t.sol` (new, 200 runs × 80 calls, reverts fail) mixes
+  deposits of levels 1–10 with carried credit, merges with a correct or stale
+  `maxSupply`, random and exactly-at/one-past-floor burns by a holder who first
+  gathers the supply, transfers, funded and certified-but-unfunded rewards and
+  Core pauses. Each outcome is predicted independently (`ReserveFull`,
+  `CheckpointRequired`, `UnexpectedSupply`, `InvalidExit`, `SupplyBelowFloor` or
+  success) and compared with the actual revert selector. Invariants: no
+  unpredicted outcome or stale-guard merge; no burn below the floor; S/W never
+  increases and S ≥ W·1e6; no checkpoint while Core is paused; rewards conserved
+  and backed; balances sum to supply. `testHandlerReachesEveryGuardedBranch`
+  shows each rejection branch is reachable through the handler.
+- Fork case `testFork_StaleSupplyGuardLeavesRealPositionsUntouchedThenFloorBoundsBurns`
+  rejects a stale guard against real Mining with positions and custody unchanged,
+  then merges and checks the floor boundaries on the real graph.
+
 ## Coverage and property selection
 
 The five discovery passes in the supplied Pashov reference were applied to the
@@ -49,11 +83,12 @@ forks exactly Sepolia block **12029130**. It checks chain ID and height. Depende
 code, storage, balances and time come from the fork; the only impersonation is
 for local NFT owner actions and test vault roles. No network transactions are sent.
 
-Seven cases exercise activation and wiring; reverse-order deposits of real IDs
+Eight cases exercise activation and wiring; reverse-order deposits of real IDs
 12 and 13 by distinct holders; a real merge, donor burn and pending weight bonus;
 SQK payouts after an entire share balance is transferred away; minimum-share
 failure and retry; ownership/approval/replay failures; unsolicited safe transfer;
-invalid claim batches; and rejection of a genuinely pending external merge.
+invalid claim batches; rejection of a genuinely pending external merge; and a
+stale merge supply guard followed by the burn floor on real positions.
 
 The existing offline replay retains the historical block **12019224** acceptance
 figures. It is a partial storage replay and is not used to stand in for the new
@@ -90,12 +125,14 @@ All checks used the seed shown above.
 | Check | Result |
 | --- | --- |
 | `forge build` | Passed; existing source/dependency linter advisories remain. |
-| Complete suite with supplied RPC | 81 Foundry-reported results passed, zero failures or skips. All seven new fork cases reached block 12029130. |
-| Complete suite without RPC variable | 74 passed, zero failures; Foundry reports the fork suite's skipped `setUp` as one skip. |
-| New arithmetic fuzzing | Two properties, 1000 runs each, passed. |
-| New entitlement invariant group | Three properties, 256 runs × 128 calls = 32,768 actions, zero reverts. |
-| Existing changing-supply invariant group | Three properties, 128 runs × 64 calls = 8192 actions, zero reverts. |
+| Complete suite with a Sepolia RPC | 91 Foundry-reported results passed, zero failures or skips. All eight fork cases reached block 12029130. |
+| Complete suite without RPC variable | 83 passed, zero failures; Foundry reports the fork suite's skipped `setUp` as one skip. |
+| Arithmetic fuzzing | Two properties, 1000 runs each, passed. |
+| Floor/pause/guard invariant group | Five properties, 200 runs × 80 calls = 16,000 actions, zero reverts. |
+| Entitlement invariant group | Three properties, 256 runs × 128 calls = 32,768 actions, zero reverts. |
+| Existing changing-supply invariant group | Four properties, 128 runs × 64 calls = 8192 actions, zero reverts. |
 
-Foundry groups each contract's three invariant properties into one reported result.
-The two intentionally failing requirements probes were scratch diagnostics, not
-submitted tests; their concrete inputs and results are in the finding report.
+Foundry groups each contract's invariant properties into one reported result.
+In this worker's shell sandbox the socket given in the RPC variable refused
+connections, so the fork run used the same chain's relay for this machine; the
+tests themselves read only the variable and fork only block 12029130.

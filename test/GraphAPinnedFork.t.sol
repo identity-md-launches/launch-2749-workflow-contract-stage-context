@@ -84,8 +84,11 @@ contract GraphAPinnedForkTest is Test {
         assertEq(ids[0], 12);
         assertEq(ids[1], 13);
 
-        vm.prank(owner);
-        vault.merge(12, 13);
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vault.merge(12, 13, supply);
+        }
         assertEq(nft.totalSupply(), nftSupply - 1);
         assertEq(nft.ownerOf(12), address(vault));
         vm.expectRevert();
@@ -193,18 +196,65 @@ contract GraphAPinnedForkTest is Test {
         mining.claim(0, ids);
         _deposit(12, alice);
         _deposit(13, bob);
-        vm.prank(alice);
-        vm.expectRevert(HamsterMiningReserve.OnlyStrategist.selector);
-        vault.merge(12, 13);
-        vm.prank(owner);
-        vault.merge(12, 13);
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(alice);
+            vm.expectRevert(HamsterMiningReserve.OnlyStrategist.selector);
+            vault.merge(12, 13, supply);
+        }
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vault.merge(12, 13, supply);
+        }
         vm.expectRevert();
         mining.claimable(0, ids);
         assertEq(vault.pendingMiningRewards(), 0);
-        vm.prank(owner);
-        vm.expectRevert(HamsterMiningReserve.InvalidMerge.selector);
-        vault.merge(12, 13);
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vm.expectRevert(HamsterMiningReserve.InvalidMerge.selector);
+            vault.merge(12, 13, supply);
+        }
         assertEq(vault.totalWeight(), 3000);
+    }
+
+    function testFork_StaleSupplyGuardLeavesRealPositionsUntouchedThenFloorBoundsBurns() public {
+        _deposit(12, alice);
+        _deposit(13, bob);
+        uint256 supply = vault.totalSupply();
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.UnexpectedSupply.selector, supply, supply - 1)
+        );
+        vault.merge(12, 13, supply - 1);
+        assertEq(mining.position(0, 12).level, 1);
+        assertEq(mining.position(0, 13).level, 1);
+        assertEq(nft.ownerOf(13), address(vault));
+        assertEq(vault.reserveCount(), 2);
+        vm.prank(owner);
+        vault.merge(12, 13, supply);
+        assertEq(mining.position(0, 12).level, 2);
+
+        vm.prank(bob);
+        vault.transfer(alice, 1000 ether);
+        uint256 floor = 3000 * vault.MIN_SHARES_PER_WEIGHT();
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, floor - 1, floor)
+        );
+        vault.renounceShares(supply - floor + 1);
+        vm.prank(alice);
+        vault.renounceShares(supply - floor);
+        assertEq(vault.totalSupply(), floor);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, floor - 1, floor)
+        );
+        vault.renounceShares(1);
+        assertEq(nft.ownerOf(12), address(vault));
+        assertEq(vault.totalWeight(), 3000);
+        assertEq(vault.totalRewardsPaid() + sqk.balanceOf(address(vault)), vault.totalRewardsReceived());
     }
 
     function testFork_PendingRealMergeCannotBeDepositedAsActivatedWeight() public {

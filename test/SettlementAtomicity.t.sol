@@ -62,16 +62,85 @@ contract SettlementAtomicityTest is ReserveTestBase {
         _retryEveryAction();
     }
 
-    function testPausedCheckpointRollsBackAllActionsButFundedClaimsRemainAvailable() public {
+    function testPausedCheckpointBlocksOnlyAdmissionsWhileExitsSettleFundedStateOnly() public {
         core.setPaused(true);
-        _allActionsRevertWithoutChange(abi.encodeWithSignature("Error(string)", "core paused"));
-        assertEq(vault.harvest(), 9 ether + 1);
-        uint256 amount = vault.claimableRewards(alice);
-        assertGt(amount, 0);
-        assertEq(_claim(alice), amount);
+        // Deposit and merge would buy into a certified-but-unfunded round: both roll back entirely.
+        bytes32 beforeState = _stateHash();
+        for (uint256 action; action < 5; action += 4) {
+            uint256 supply = vault.totalSupply();
+            vm.prank(_actor(action));
+            vm.expectRevert(HamsterMiningReserve.CheckpointRequired.selector);
+            _act(action, supply);
+            assertEq(_stateHash(), beforeState, "failed admission changed reserve or dependency state");
+        }
+        // Transfer, delegated transfer and burn proceed without attempting a checkpoint.
+        for (uint256 action = 1; action < 4; ++action) {
+            vm.prank(_actor(action));
+            _act(action, 0);
+        }
+        assertEq(mining.checkpoints(), 0);
         assertEq(mining.checkpointBacklog(), 1);
+        assertEq(vault.totalRewardsReceived(), 9 ether + 1, "only the funded round was harvested");
+        assertEq(vault.balanceOf(alice), 997 ether);
+        assertEq(vault.balanceOf(bob), 1002 ether);
+        assertEq(vault.totalSupply(), 1999 ether);
+        assertEq(vault.allowance(alice, carol), 6 ether);
+        // The funded round was settled at the pre-transfer 1000/1000 split.
+        assertEq(vault.claimableRewards(alice), 4.5 ether);
+        assertEq(vault.claimableRewards(bob), 4.5 ether);
+        assertEq(_claim(alice), 4.5 ether);
+
         core.setPaused(false);
-        _retryEveryAction();
+        uint256 supplyBefore = vault.totalSupply();
+        vm.prank(carol);
+        vault.deposit(14, 999 ether);
+        assertEq(mining.checkpoints(), 1);
+        assertEq(mining.checkpointBacklog(), 0);
+        // The round certified during the pause is funded to whoever held shares when it was funded.
+        assertApproxEqAbs(vault.claimableRewards(alice), uint256(11 ether + 1) * 997 / 1999, 1);
+        assertApproxEqAbs(vault.claimableRewards(bob), 4.5 ether + uint256(11 ether + 1) * 1002 / 1999, 1);
+        assertEq(vault.claimableRewards(carol), 7 ether, "new depositor only receives its NFT's own credit");
+        assertEq(vault.balanceOf(carol), uint256(1000) * supplyBefore / 2000);
+        uint256 supply = vault.totalSupply();
+        vm.prank(owner);
+        vault.merge(12, 13, supply);
+        assertEq(vault.totalWeight(), 4000);
+        assertEq(vault.totalRewardsReceived(), 27 ether + 2);
+        _assertSolvent();
+    }
+
+    function testPausedCoreWithoutCertifiedRoundDoesNotBlockAdmissions() public {
+        mining.checkpoint();
+        core.setPaused(true);
+        uint256 supply = vault.totalSupply();
+        vm.prank(carol);
+        vault.deposit(14, 1000 ether);
+        vm.prank(owner);
+        vault.merge(12, 13, supply + 1000 ether);
+        assertEq(mining.checkpoints(), 1);
+        assertEq(vault.totalWeight(), 4000);
+        assertEq(vault.claimableRewards(carol), 7 ether);
+        _assertSolvent();
+    }
+
+    function testPausedExitStillFailsAtomicallyWhenFundedHarvestFails() public {
+        core.setPaused(true);
+        mining.setFailClaim(true);
+        bytes32 beforeState = _stateHash();
+        for (uint256 action = 1; action < 4; ++action) {
+            vm.prank(_actor(action));
+            vm.expectRevert("claim failed");
+            _act(action, 0);
+            assertEq(_stateHash(), beforeState);
+        }
+        mining.setFailClaim(false);
+        mining.setMisreportClaim(true);
+        for (uint256 action = 1; action < 4; ++action) {
+            vm.prank(_actor(action));
+            vm.expectRevert(HamsterMiningReserve.InvalidRewardPayment.selector);
+            _act(action, 0);
+            assertEq(_stateHash(), beforeState);
+        }
     }
 
     function testInsufficientAllowanceUndoesTheCheckpointAndHarvestThatPrecedeValidation() public {
@@ -198,17 +267,19 @@ contract SettlementAtomicityTest is ReserveTestBase {
     function _allActionsRevertWithoutChange(bytes memory error) private {
         bytes32 beforeState = _stateHash();
         for (uint256 action; action < 5; ++action) {
+            uint256 supply = vault.totalSupply();
             vm.prank(_actor(action));
             vm.expectRevert(error);
-            _act(action);
+            _act(action, supply);
             assertEq(_stateHash(), beforeState, "failed action changed reserve or dependency state");
         }
     }
 
     function _retryEveryAction() private {
         for (uint256 action; action < 5; ++action) {
+            uint256 supply = vault.totalSupply();
             vm.prank(_actor(action));
-            _act(action);
+            _act(action, supply);
         }
         assertEq(mining.checkpointBacklog(), 0);
         assertEq(vault.reserveCount(), 2);
@@ -224,12 +295,12 @@ contract SettlementAtomicityTest is ReserveTestBase {
         return alice;
     }
 
-    function _act(uint256 action) private {
+    function _act(uint256 action, uint256 supply) private {
         if (action == 0) vault.deposit(14, 1000 ether);
         else if (action == 1) vault.transfer(bob, 1 ether);
         else if (action == 2) vault.transferFrom(alice, bob, 1 ether);
         else if (action == 3) vault.renounceShares(1 ether);
-        else vault.merge(12, 13);
+        else vault.merge(12, 13, supply);
     }
 
     function _stateHash() private view returns (bytes32) {

@@ -16,12 +16,17 @@ contract ShareArithmeticTest is ReserveTestBase {
         uint8 incomingLevel = uint8(bound(incomingSeed, 1, 10));
         _deposit(alice, 12, level);
         _deposit(bob, 13, level);
-        vm.prank(owner);
-        vault.merge(12, 13);
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vault.merge(12, 13, supply);
+        }
         uint256 bobShares = vault.balanceOf(bob);
         vm.prank(bob);
         vault.transfer(alice, bobShares);
-        uint256 burned = bound(burnSeed, 0, vault.totalSupply() - 1);
+        // Anything up to the precision floor is burnable; beyond it is checked in its own tests.
+        uint256 floor = vault.totalWeight() * vault.MIN_SHARES_PER_WEIGHT();
+        uint256 burned = bound(burnSeed, 0, vault.totalSupply() - floor);
         if (burned != 0) {
             vm.prank(alice);
             vault.renounceShares(burned);
@@ -40,14 +45,8 @@ contract ShareArithmeticTest is ReserveTestBase {
         assertEq(vault.totalWeight(), weightBefore);
         assertEq(vault.totalSupply(), supplyBefore);
 
-        if (preview == 0) {
-            // Zero-share admission must fail without confiscating the incoming NFT.
-            vm.prank(carol);
-            vm.expectRevert(abi.encodeWithSelector(HamsterMiningReserve.MinimumSharesNotMet.selector, 0, 0));
-            vault.deposit(14, 0);
-            assertEq(nft.ownerOf(14), carol);
-            return;
-        }
+        // The floor keeps every level quotable: no burn sequence can lock a depositor out.
+        assertGe(preview, addedWeight * vault.MIN_SHARES_PER_WEIGHT());
         vm.prank(carol);
         uint256 minted = vault.deposit(14, preview);
         assertEq(minted, preview);
@@ -122,28 +121,38 @@ contract ShareArithmeticTest is ReserveTestBase {
         _assertSolvent();
     }
 
-    function testOneRemainingShareCanCollectTheFullUint128RewardBoundary() public {
+    function testFloorSupplyCanCollectTheFullUint128RewardBoundary() public {
         _deposit(alice, 12, 10);
-        uint256 burned = vault.totalSupply() - 1;
+        uint256 floor = 1_023_000 * vault.MIN_SHARES_PER_WEIGHT();
+        uint256 initial = vault.totalSupply();
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, 1, floor));
+        vault.renounceShares(initial - 1);
+        uint256 burned = vault.totalSupply() - floor;
         vm.prank(alice);
         vault.renounceShares(burned);
-        assertEq(vault.totalSupply(), 1);
+        assertEq(vault.totalSupply(), floor);
         uint256 amount = type(uint128).max;
         mining.credit(12, amount);
         assertEq(vault.harvest(), amount);
-        assertEq(_claim(alice), amount);
+        uint256 claimed = _claim(alice);
+        assertLe(claimed, amount);
+        assertApproxEqAbs(claimed, amount, 1);
         assertEq(_claim(alice), 0);
         assertEq(vault.totalWeight(), 1_023_000);
         assertEq(nft.ownerOf(12), address(vault));
-        assertEq(vault.rewardFraction(alice), 0);
-        vm.prank(alice);
+        vm.startPrank(alice);
         vm.expectRevert(HamsterMiningReserve.InvalidExit.selector);
+        vault.renounceShares(floor);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, floor - 1, floor)
+        );
         vault.renounceShares(1);
-        vm.prank(alice);
         vault.transfer(bob, 1);
-        mining.credit(12, 1);
+        vm.stopPrank();
+        mining.credit(12, floor);
         vault.harvest();
-        assertEq(_claim(alice), 0);
+        assertEq(_claim(alice), floor - 1);
         assertEq(_claim(bob), 1);
         _assertSolvent();
     }
@@ -158,7 +167,7 @@ contract ShareArithmeticTest is ReserveTestBase {
             uint256 weight = vault.totalWeight();
             uint256 count = vault.reserveCount();
             vm.prank(owner);
-            vault.merge(survivor, donor);
+            vault.merge(survivor, donor, supply);
             assertEq(vault.totalWeight(), weight + 1000);
             assertEq(vault.totalSupply(), supply);
             assertEq(vault.reserveCount(), count - 1);
@@ -179,14 +188,23 @@ contract ShareArithmeticTest is ReserveTestBase {
         assertEq(ids[1], 2);
         assertEq(ids[2], 1 << 255);
         assertEq(ids[3], type(uint256).max);
-        vm.prank(owner);
-        vault.merge(2, 1); // remove head
-        vm.prank(owner);
-        vault.merge(1 << 255, type(uint256).max); // remove tail
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vault.merge(2, 1, supply); // remove head
+        }
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vault.merge(1 << 255, type(uint256).max, supply); // remove tail
+        }
         mining.activatePending();
         core.setHeight(100_001);
-        vm.prank(owner);
-        vault.merge(2, 1 << 255);
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vault.merge(2, 1 << 255, supply);
+        }
         ids = vault.liveTokenIds();
         assertEq(ids.length, 1);
         assertEq(ids[0], 2);

@@ -120,7 +120,7 @@ contract RewardOwnershipHandler is Test {
         for (uint256 i; i < ids.length; ++i) {
             if (ids[i] == survivor || vault.reserveLevel(ids[i]) != level) continue;
             _allocate();
-            vault.merge(survivor, ids[i]);
+            vault.merge(survivor, ids[i], vault.totalSupply());
             ++merges;
             assertEq(vault.reserveLevel(ids[i]), 0, "burned donor remains tracked");
             assertEq(vault.reserveLevel(survivor), level + 1);

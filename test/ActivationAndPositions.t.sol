@@ -130,14 +130,20 @@ contract ActivationAndPositionsTest is ReserveTestBase {
         mining.credit(12, 20 ether);
         vm.prank(owner);
         vault.setStrategist(carol);
-        vm.prank(owner);
-        vm.expectRevert(HamsterMiningReserve.OnlyStrategist.selector);
-        vault.merge(12, 13);
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(owner);
+            vm.expectRevert(HamsterMiningReserve.OnlyStrategist.selector);
+            vault.merge(12, 13, supply);
+        }
         assertEq(vault.totalRewardsReceived(), 0);
         assertEq(vault.pendingMiningRewards(), 20 ether);
         assertEq(vault.reserveCount(), 2);
-        vm.prank(carol);
-        vault.merge(12, 13);
+        {
+            uint256 supply = vault.totalSupply();
+            vm.prank(carol);
+            vault.merge(12, 13, supply);
+        }
         assertEq(vault.totalWeight(), 3000);
         assertEq(vault.claimableRewards(alice), 10 ether);
         assertEq(vault.claimableRewards(bob), 10 ether);
