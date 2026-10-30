@@ -1,0 +1,12 @@
+{
+  "kind": "evm_contracts",
+  "contracts": [
+    {
+      "contract": "HamsterMiningReserve",
+      "constructorArgs": [
+        "$owner"
+      ]
+    }
+  ],
+  "notes": "Hamster Mining Reserve (HMR): one nonpayable application contract on Sepolia, HamsterMiningReserve (src/HamsterMiningReserve.sol), a permanent merge-pooling vault for Squeekchain Graph A Genesis Squeek mining NFTs with internal ERC-20 accounting shares hmSQUEEK (Ownable2Step, ReentrancyGuard, IERC721Receiver). Constructor: HamsterMiningReserve(address owner_) = $owner, the launch owner. owner_ becomes the Ownable2Step owner and the initial strategist; the factory msg.sender and tx.origin receive no role. The constructor makes no external call, requires no deployed code, creates no child contract and mints no shares, so it deploys on an empty chain. Graph A addresses are compile-time constants: Core 0x74665dAecA35A2303e767E76a2FF1FB6F93e119f, Mining proxy 0x3beE588fC20dE788Bac17d33b41Da7346cb27EC4 with required implementation 0x08890b360C65FD878344Bf6e23d1c36358433B4E, SqueekNFT 0x0eAF3E0d40A0a8E5a6Ac030b2459E9FB0B7905c6; the vault never calls api.squeekchain.com. SQK is not a constructor input: the owner calls activate() once after deployment, which checks chain id 11155111, Graph A identity (Mining v6, Core v3), NFT links, MAX_LEVELS 10, MAX_CLAIMS 32 and all level weights, then reads and pins Mining.configuration().token. No tradeable token, liquidity pool, premint, reward distributor, ETH funding or initialization call is part of this launch; hmSQUEEK is minted and burned only by the vault on deposit and renounce. Owner may call setStrategist(address) and the two-step ownership transfer. No NFT withdrawal, admin sweep, arbitrary call, proxy or upgrade path exists."
+}
