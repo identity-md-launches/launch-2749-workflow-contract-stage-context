@@ -1,0 +1,346 @@
+[
+  {
+    "type": "function",
+    "name": "MAX_CLAIMS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_LEVELS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "checkpoint",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "checkpointStatus",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "corePaused",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "nextRound",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "roundSettled",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "claim",
+    "inputs": [
+      {
+        "name": "collection",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "tokenIds",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "paid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimable",
+    "inputs": [
+      {
+        "name": "collection",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "tokenIds",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "configuration",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct IGraphAMining.Configuration",
+        "components": [
+          {
+            "name": "core",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "streamId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "governance",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "genesisCollection",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "genesisTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "genesisMaxSupply",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxWorkPerRound",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "minimumTimelockDelay",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "supplyCap",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "genesisMaximumLevel",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "initialWorkPerThousandBlocks",
+            "type": "uint32",
+            "internalType": "uint32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "core",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "deploymentIdentity",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "admin",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "implementationCodeAddress",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "implementationCodeVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "merge",
+    "inputs": [
+      {
+        "name": "collection",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "survivorId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "donorId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "position",
+    "inputs": [
+      {
+        "name": "collection",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct IGraphAMining.Position",
+        "components": [
+          {
+            "name": "activeWeight",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "pendingWeight",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "pendingRound",
+            "type": "uint40",
+            "internalType": "uint40"
+          },
+          {
+            "name": "nextMergeBlock",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "level",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "lastIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "accruedScaled",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "weightForLevel",
+    "inputs": [
+      {
+        "name": "collection",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "level",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  }
+]

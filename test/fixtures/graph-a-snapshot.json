@@ -1,0 +1,47 @@
+{
+  "chainId": 11155111,
+  "blockNumber": 12019224,
+  "blockHash": "0x415526f82a22ebc9a1c14af7e0f6c06cfa9bdf755f6cdbac58a967ad949f0f2c",
+  "stateRoot": "0x40ad3d3976d30759d1d3485a2b897ede345a4b743dd8448e411c09835274907e",
+  "timestamp": 1793273508,
+  "scope": "Original runtime bytes and only storage slots read by GraphAAssertions at this block. Not a complete state snapshot or a state-root proof.",
+  "source": "https://sepolia.rpc.sentio.xyz",
+  "contracts": [
+    {
+      "address": "0x08890b360c65fd878344bf6e23d1c36358433b4e",
+      "runtimeBytes": 20882,
+      "runtimeSha256": "414d894c4e1bfe172cea6f271d57bbc42ebdc21bbb5f94a4868b576a6ae08a72",
+      "storageSlots": 0
+    },
+    {
+      "address": "0x0a71c86ab63a77675002a389fdf4d096a07b11e2",
+      "runtimeBytes": 10344,
+      "runtimeSha256": "c1d0e3500a50eb052d2d9456106224151e30731f57996757fe7d88dd766e2796",
+      "storageSlots": 0
+    },
+    {
+      "address": "0x0eaf3e0d40a0a8e5a6ac030b2459e9fb0b7905c6",
+      "runtimeBytes": 11727,
+      "runtimeSha256": "a8d5adc4b31f4e52851c4474dc51db34c902e5efdcb8df13cfffde0c424882be",
+      "storageSlots": 8
+    },
+    {
+      "address": "0x3bee588fc20de788bac17d33b41da7346cb27ec4",
+      "runtimeBytes": 896,
+      "runtimeSha256": "d912999766fa4e90f34168f25bde2b3d249361f0b5aa2d44caae6b23ccb745a8",
+      "storageSlots": 35
+    },
+    {
+      "address": "0x6872bfa5ccc3e9e440c6c16e5ffdabb8dba4cc76",
+      "runtimeBytes": 3591,
+      "runtimeSha256": "1fec500f2d275082c9f904da25590d813295d2672be6f3d308913f40f2ac4f81",
+      "storageSlots": 3
+    },
+    {
+      "address": "0x74665daeca35a2303e767e76a2ff1fb6f93e119f",
+      "runtimeBytes": 761,
+      "runtimeSha256": "463516cccf73a179a66826659ed82307a7b72bff49b916a745665dea542b6991",
+      "storageSlots": 4
+    }
+  ]
+}

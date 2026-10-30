@@ -1,0 +1,70 @@
+[
+  {
+    "type": "function",
+    "name": "implementationCodeVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "state",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct IGraphACore.State",
+        "components": [
+          {
+            "name": "settledThroughRound",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "cumulativeWork",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "cumulativeBlockUnits",
+            "type": "uint96",
+            "internalType": "uint96"
+          },
+          {
+            "name": "blockHeight",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "blockProgress",
+            "type": "uint96",
+            "internalType": "uint96"
+          },
+          {
+            "name": "workPerThousandBlocks",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "authorizationNonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "paused",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  }
+]
