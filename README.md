@@ -94,6 +94,36 @@ Other choices left open by the workflow:
   `renounceShares` burns a caller's shares without NFT redemption and keeps their
   accrued SQK claimable. The last outstanding supply cannot be burned: otherwise
   a later first depositor could capture the entire permanent reserve.
+- **Burn floor: `MIN_SHARES_PER_WEIGHT = 1e9` share units per final weight unit.**
+  A burn that would leave `totalSupply < totalWeight * 1e9` reverts
+  `SupplyBelowFloor`. Without it a dominant holder could burn to a few base units
+  at no cost to itself, after which `floor(w * S / W)` would quote zero for small
+  NFTs forever and under-mint large ones. The floor keeps every later deposit
+  priced to about one part in 1e9. Deposits and merges alone never reach it
+  (the initial ratio is 1e18 and merges can shrink it by at most a few 1e4),
+  so it only ever constrains voluntary burns; once merges have pushed the ratio
+  under the floor, no further burns are possible and transfer is the exit.
+- **Merge supply guard.** `merge(survivorId, donorId, maxSupply)` reverts
+  `UnexpectedSupply` if share supply exceeds `maxSupply`. The strategist passes
+  the supply it saw when preparing the merge, so a deposit ordered in front of
+  the merge transaction cannot buy in at the pre-bonus price and then share the
+  +1000 bonus. `type(uint256).max` disables the guard. Burns only lower supply
+  and never trip it.
+- **Graph A identity is pinned where it matters.** `activate()` and `merge()`
+  require Mining v6 at the pinned implementation and Core v3. `harvest()`,
+  `deposit()`, share transfers and burns do not re-check it: they only
+  distribute SQK the vault physically received, equal to Mining's reported
+  payment, so a later Graph A proxy upgrade can never strand the reserve's SQK
+  or block the share-transfer exit. Merging is the one call that changes
+  positions and stays frozen on an unrecognised implementation.
+- **Core pause.** While Core is paused nobody can checkpoint Mining. Transfers
+  and burns between existing holders still proceed on funded state (any round
+  certified during the pause follows the shares to whoever holds them when it is
+  funded). Deposits and merges wait with `CheckpointRequired`, so nobody can buy
+  into a certified-but-unfunded round.
+- **`renounceOwnership()` is refused before activation.** Renouncing earlier
+  would make `activate()` unreachable and the vault useless. After activation it
+  behaves as in Ownable2Step and leaves the current strategist in place.
 - **Incoming NFT rewards:** already-funded SQK carried by an incoming NFT belongs
   to its depositor, rather than being donated to previous pool holders. Mining's
   sub-base-unit fraction stays on the NFT and joins subsequent pool rewards.
@@ -114,8 +144,9 @@ inputs that require another requester answer.
    credited separately. Shares minted are `floor(weight * supply / totalWeight)`;
    the empty initial reserve instead uses `weight * 1e18`. There is no asset-price
    oracle or market-value claim. Direct NFT/token donations do not affect pricing.
-3. The strategist calls `merge(survivorId, donorId)` for two live equal levels below
-   10. Both must be activated and past their **Squeek Core block-height** cooldown,
+3. The strategist calls `merge(survivorId, donorId, maxSupply)` for two live equal
+   levels below 10, passing the share supply observed when the merge was prepared.
+   Both must be activated and past their **Squeek Core block-height** cooldown,
    not Ethereum's block number. Mining burns the donor; the vault verifies the
    survivor's resulting level, current weight and scheduled final weight. Nobody,
    including the owner, can withdraw a reserve NFT or redirect it elsewhere.
@@ -129,7 +160,8 @@ inputs that require another requester answer.
 6. `transfer` and `transferFrom` settle funded rewards before moving nonzero shares
    between different accounts. Past rewards stay with the sender and future
    distributions follow the recipient. `renounceShares` does the same before
-   burning. Share transfers to the vault itself are rejected to prevent accidental
+   burning, and refuses any burn that would take supply under the precision
+   floor. Share transfers to the vault itself are rejected to prevent accidental
    permanent loss of claims. Standard allowances apply to `transferFrom`.
 
 The pool does not promise income for uncertified work. Allocation is based on
@@ -168,14 +200,24 @@ The **owner**, not IMD, is responsible for activation and ongoing operation:
 | `transferOwnership(address)` then `acceptOwnership()` | Current/new owner | Optional ownership handoff to the requester's chosen wallet or multisig. It does not automatically rotate an existing strategist; rotate that role explicitly. |
 | `Mining.checkpoint()` | Anyone/keeper | Advances funded rounds and pending weight activations after Core settlement. If more than one bounded checkpoint is needed, call Mining directly until caught up, then retry share changes. |
 | `harvest()` | Anyone/keeper | Claims all live pool IDs and updates the reward index. No keeper fee is charged or promised. |
-| `merge(survivorId, donorId)` | Strategist | Select equal active levels, inspect pending rounds and Core-height cooldowns, then merge. |
+| `merge(survivorId, donorId, maxSupply)` | Strategist | Select equal active levels, inspect pending rounds and Core-height cooldowns, read `totalSupply()` and pass it as `maxSupply`, then merge. A revert with `UnexpectedSupply` means a deposit landed first: re-read the supply and resubmit. Requires Mining still at the pinned v6 implementation and Core v3. |
 | Frontend configuration | Frontend/service operator | Use the confirmed deployed vault address from the service handoff and chain 11155111; use the supplied ABI files and direct RPC reads. See `docs/ABI.md`. |
 
 There are no requester-held keys, registry IDs, signers, fees or subscription
 values to fabricate or defer. SQK is deterministically discovered from the pinned
-graph. Do not renounce ownership before activation; doing so disables activation
-permanently. Renouncing later removes owner management while leaving the last
-strategist in place.
+graph. `renounceOwnership()` reverts `NotActivated` until activation has
+succeeded, so the vault cannot be disabled by renouncing too early. Renouncing
+later removes owner management while leaving the last strategist in place.
+
+**Requester acknowledgement needed on wording only:** the approved text attributes
+`implementationCodeVersion() == 6`, implementation `0x08890b36…` and
+`claimable(0,[12,13])` to SqueekCore. On the named Sepolia deployment those
+belong to Mining `0x3beE588f…`; Core `0x74665dAe…` reports version 3 and has no
+`claimable` selector. The vault therefore requires Mining v6 at that
+implementation and Core v3, which is the only reading under which the approved
+acceptance value `12461.377786582968289288 SQK` can be observed. Requiring
+Core == 6 would make `activate()` revert on the specified graph. No code change
+can reconcile the text; the attribution should be corrected in the brief.
 
 ## Trust and limitations
 
@@ -187,19 +229,31 @@ claimant; shares and NFTs carry no promised principal redemption.
 
 Graph A's governance, Core reporter and underlying contracts remain external
 trust dependencies. They control settlement, pauses and upgrades. The vault pins
-Mining's actual proxy implementation and advertised identity and checks Core v3;
-unsupported upgrades halt deposits, transfers, burns, merging and harvesting.
-There is deliberately no owner bypass to accept a changed graph. Accounted SQK
-can still be claimed if its token supports transfers. SQK transfers that fail
-revert without consuming the user's credit. The design assumes Graph A's standard
-non-rebasing, non-fee SQK token; a claim return inconsistent with the actual
-balance delta is rejected.
+Mining's actual proxy implementation and advertised identity and checks Core v3
+at activation and before every merge. An unrecognised upgrade halts merging
+only: harvesting, deposits, transfers and burns continue because they rely on
+the physical SQK balance delta matching Mining's reported payment, not on the
+implementation's identity. A Mining whose `claim` stops working or stops paying
+the vault stops new rewards and, because every share change claims first, also
+blocks share changes until it works again; accounted SQK can still be claimed if
+its token supports transfers. There is deliberately no owner bypass or re-pin.
+SQK transfers that fail revert without consuming the user's credit. The design
+assumes Graph A's standard non-rebasing, non-fee SQK token; a claim return
+inconsistent with the actual balance delta is rejected.
 
-Share changes require a working, caught-up Mining dependency. A paused Core with
-certified but uncheckpointed rounds or an outstanding checkpoint backlog can
-block them. Funded harvesting and accounted claims do not require new Core
-settlement. There are no emergency NFT refunds, replacement graph addresses,
-admin-controlled reward recipients, or promised keeper availability.
+Deposits and merges require a working, caught-up Mining dependency. A paused
+Core with certified but uncheckpointed rounds or an outstanding checkpoint
+backlog blocks them. Transfers and burns proceed during a Core pause on funded
+state alone; a backlog that one bounded checkpoint cannot clear blocks them until
+anyone advances Mining directly. Funded harvesting and accounted claims do not
+require new Core settlement. There are no emergency NFT refunds, replacement
+graph addresses, admin-controlled reward recipients, or promised keeper
+availability.
+
+A merge broadcast publicly can still be observed in the mempool. The
+`maxSupply` guard makes a deposit ordered ahead of it revert the merge rather
+than dilute the bonus; the strategist then resubmits. Submitting merges through
+a private relay avoids the retry.
 
 The owner appoints the strategist; a malicious or absent strategist can choose
 poor timing or stop merges, but cannot extract reserve assets. Tests and the

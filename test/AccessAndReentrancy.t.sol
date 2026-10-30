@@ -102,7 +102,27 @@ contract AccessAndReentrancyTest is ReserveTestBase {
         vault.setStrategist(alice);
         _twoDepositors();
         vm.prank(carol);
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
+    }
+
+    function testOwnershipCannotBeRenouncedBeforeActivationAndStrategistSurvivesRenounce() public {
+        HamsterMiningReserve fresh = new HamsterMiningReserve(owner);
+        vm.prank(owner);
+        vm.expectRevert(HamsterMiningReserve.NotActivated.selector);
+        fresh.renounceOwnership();
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, alice));
+        fresh.renounceOwnership();
+        assertEq(fresh.owner(), owner);
+        vm.prank(owner);
+        fresh.activate();
+        vm.prank(owner);
+        fresh.renounceOwnership();
+        assertEq(fresh.owner(), address(0));
+        assertEq(fresh.strategist(), owner);
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, owner));
+        fresh.setStrategist(bob);
     }
 
     function testProxyImplementationMustMatchEvenIfLogicSpoofsItsIdentity() public {

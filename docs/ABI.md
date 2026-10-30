@@ -19,13 +19,14 @@ Regenerate with `forge build && python3 tools/export-abi.py`. Check for drift wi
 | `activate()` | Owner, once | Verify Sepolia/Graph A and pin the discovered SQK token; emits `Activated` |
 | `setStrategist(address)` | Owner | Replace the nonzero merge operator; emits `StrategistUpdated` |
 | `deposit(uint256 tokenId, uint256 minShares) returns (uint256 shares)` | NFT owner | Permanently transfer a single approved live NFT and mint proportional shares |
-| `merge(uint256 survivorId, uint256 donorId)` | Strategist | Merge two owned, activated equal levels, burn the donor and account for the bonus |
-| `harvest() returns (uint256 amount)` | Anyone | Collect all live reserve IDs, credit the reward index; no caller reward |
+| `merge(uint256 survivorId, uint256 donorId, uint256 maxSupply)` | Strategist | Merge two owned, activated equal levels, burn the donor and account for the bonus; reverts if `totalSupply() > maxSupply` (pass the supply read when preparing the merge) |
+| `harvest() returns (uint256 amount)` | Anyone | Collect all live reserve IDs, credit the reward index; no caller reward; works across Mining upgrades |
 | `claimRewards() returns (uint256 amount)` | Claimant | Transfer accounted SQK only to `msg.sender`; no implicit harvest |
-| `renounceShares(uint256 shares)` | Share holder | Optional voluntary burn, keeping accrued SQK; never returns NFTs or burns the entire supply |
-| `transfer(address,uint256)`, `transferFrom(address,address,uint256)` | Holder / approved spender | Settle funded rewards, then move future participation rights |
+| `renounceShares(uint256 shares)` | Share holder | Optional voluntary burn, keeping accrued SQK; never returns NFTs, burns the entire supply, or leaves fewer than `MIN_SHARES_PER_WEIGHT` units per weight unit |
+| `transfer(address,uint256)`, `transferFrom(address,address,uint256)` | Holder / approved spender | Settle funded rewards, then move future participation rights; allowed during a Core pause |
 | `approve`, `allowance`, `balanceOf`, `totalSupply`, `name`, `symbol`, `decimals` | ERC-20 semantics | 18-decimal accounting shares; no mint/pool/sale interface |
-| `owner`, `pendingOwner`, `transferOwnership`, `acceptOwnership`, `renounceOwnership` | Ownable2Step semantics | Explicit two-step ownership handoff; strategist does not automatically change |
+| `owner`, `pendingOwner`, `transferOwnership`, `acceptOwnership`, `renounceOwnership` | Ownable2Step semantics | Explicit two-step ownership handoff; strategist does not automatically change; `renounceOwnership` reverts `NotActivated` before activation |
+| `MIN_SHARES_PER_WEIGHT()` | View | Burn floor constant, 1e9 share units per final weight unit |
 
 `Deposited` records contributor, NFT, final contributed weight, shares and carried
 SQK. `Merged` records survivor, donor, new level and total final weight. `Harvested`
@@ -101,12 +102,14 @@ the required v6 address, as well as checking the implementation's self-report.
 | Error | User/operator response |
 | --- | --- |
 | `NotActivated` | Owner must successfully call `activate()` first |
-| `WrongChain` / `UnsupportedImplementation` / `InvalidGraph` | Check chain, deployed graph and version; no owner override exists |
+| `WrongChain` / `UnsupportedImplementation` / `InvalidGraph` | Check chain, deployed graph and version; raised by `activate` and `merge` only; no owner override exists |
+| `SupplyBelowFloor(remainingSupply, minimumSupply)` | Burn would leave less than `totalWeight * 1e9` share units; burn less or transfer instead |
+| `UnexpectedSupply(actualSupply, maximumSupply)` | A deposit landed before the merge; re-read `totalSupply()` and resubmit the merge |
 | `ReserveFull` | Current live reserve has 32 NFTs; a valid merge frees one slot |
 | `InvalidDeposit` / `InvalidPosition` | Verify ownership, Genesis collection, live level and weight |
 | `PendingActivation` | Wait for Graph A settlement and checkpoint the scheduled activation |
 | `MinimumSharesNotMet` | Refresh quote and review the new minimum; never silently retry with zero |
-| `CheckpointRequired` | Advance Mining's bounded checkpoints directly until caught up, then retry |
+| `CheckpointRequired` | Advance Mining's bounded checkpoints directly until caught up, then retry; during a Core pause deposits and merges wait while transfers and burns still proceed |
 | `MergeCooldown` | Wait for the supplied Squeek Core height, not a fixed wall-clock duration |
 | `OnlyStrategist` / Ownable errors | Use the authorized role |
 | `InvalidExit` | Burn must be positive and smaller than outstanding supply; transfer is the normal exit |

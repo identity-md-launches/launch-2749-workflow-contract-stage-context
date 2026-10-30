@@ -28,8 +28,7 @@ contract ReserveHandler is Test {
         if (vault.reserveCount() == vault.MAX_RESERVE_NFTS()) return;
         address actor = actors[actorSeed % 3];
         uint8 level = uint8(bound(levelSeed, 1, 5));
-        // A voluntary burn can leave too little supply to quote even one share unit.
-        if (vault.weightForLevel(level) * vault.totalSupply() < vault.totalWeight()) return;
+        // No rounding guard: the burn floor must keep every level depositable after any sequence.
         uint256 amount = bound(carriedSeed, 0, 1e24);
         uint256 id = nextId++;
         nft.mint(actor, id);
@@ -73,9 +72,23 @@ contract ReserveHandler is Test {
     function burn(uint8 actorSeed, uint96 amountSeed) external {
         address actor = actors[actorSeed % 3];
         uint256 limit = vault.balanceOf(actor);
-        if (limit >= vault.totalSupply()) limit = vault.totalSupply() - 1;
+        uint256 supply = vault.totalSupply();
+        uint256 floor = vault.totalWeight() * vault.MIN_SHARES_PER_WEIGHT();
+        if (supply <= floor) return;
+        if (limit > supply - floor) limit = supply - floor;
+        if (limit >= supply) limit = supply - 1;
         if (limit == 0) return;
         uint256 amount = bound(amountSeed, 1, limit);
+        vm.prank(actor);
+        vault.renounceShares(amount);
+    }
+
+    function burnToFloor(uint8 actorSeed) external {
+        address actor = actors[actorSeed % 3];
+        uint256 supply = vault.totalSupply();
+        uint256 floor = vault.totalWeight() * vault.MIN_SHARES_PER_WEIGHT();
+        uint256 amount = supply - floor;
+        if (supply <= floor || amount > vault.balanceOf(actor) || amount == 0) return;
         vm.prank(actor);
         vault.renounceShares(amount);
     }
@@ -91,7 +104,7 @@ contract ReserveHandler is Test {
         if (level >= 10) return;
         for (uint256 i; i < ids.length; ++i) {
             if (ids[i] == survivor || vault.reserveLevel(ids[i]) != level) continue;
-            vault.merge(survivor, ids[i]);
+            vault.merge(survivor, ids[i], vault.totalSupply());
             break;
         }
     }
@@ -107,7 +120,7 @@ contract ReserveInvariantTest is StdInvariant, ReserveTestBase {
         vm.prank(owner);
         vault.setStrategist(address(handler));
         targetContract(address(handler));
-        bytes4[] memory selectors = new bytes4[](7);
+        bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = handler.deposit.selector;
         selectors[1] = handler.reward.selector;
         selectors[2] = handler.harvest.selector;
@@ -115,6 +128,7 @@ contract ReserveInvariantTest is StdInvariant, ReserveTestBase {
         selectors[4] = handler.claim.selector;
         selectors[5] = handler.burn.selector;
         selectors[6] = handler.merge.selector;
+        selectors[7] = handler.burnToFloor.selector;
         targetSelector(FuzzSelector(address(handler), selectors));
     }
 
@@ -152,5 +166,13 @@ contract ReserveInvariantTest is StdInvariant, ReserveTestBase {
         assertGt(vault.totalSupply(), 0);
         assertEq(vault.balanceOf(owner), 0);
         assertEq(vault.balanceOf(address(vault)), 0);
+    }
+
+    /// Burns stop at MIN_SHARES_PER_WEIGHT per weight unit and merges add at most 1000 weight each, so
+    /// the share price never degrades far enough for any level to quote zero or round coarsely.
+    function invariantSupplyNeverCollapsesBelowPrecisionFloor() public view {
+        assertGe(vault.totalSupply(), vault.totalWeight() * 1e7);
+        uint256 quote = vault.totalSupply() * vault.weightForLevel(1) / vault.totalWeight();
+        assertGe(quote, 1e10);
     }
 }

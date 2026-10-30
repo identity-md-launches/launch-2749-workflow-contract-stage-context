@@ -16,7 +16,7 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         mining.credit(13, 20 ether);
         assertEq(vault.pendingMiningRewards(), 100 ether);
         vm.prank(owner);
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
         assertEq(vault.totalWeight(), 3000);
         assertEq(vault.totalSupply(), 2000 ether);
         assertEq(vault.reserveCount(), 1);
@@ -42,7 +42,7 @@ contract HamsterMiningReserveTest is ReserveTestBase {
     function testDepositPricingPreservesExistingMergeGainIncludingPendingBonus() public {
         _twoDepositors();
         vm.prank(owner);
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
         _mintNFT(carol, 14, 1);
         uint256 expected = uint256(2000 ether) / 3;
         assertEq(vault.previewDeposit(14), expected);
@@ -76,7 +76,7 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         assertEq(ids[1], 15);
         assertEq(ids[2], 19);
         vm.prank(owner);
-        vault.merge(19, 3);
+        vault.merge(19, 3, type(uint256).max);
         ids = vault.liveTokenIds();
         assertEq(ids.length, 2);
         assertEq(ids[0], 15);
@@ -155,13 +155,47 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         vault.harvest();
         assertEq(_claim(alice), 31 ether);
         mining.deferCredit(12, 10 ether);
-        vm.prank(alice);
-        vm.expectRevert("core paused");
-        vault.transfer(bob, 1);
+        _mintNFT(bob, 13, 1);
+        vm.prank(bob);
+        vm.expectRevert(HamsterMiningReserve.CheckpointRequired.selector);
+        vault.deposit(13, 0);
         core.setPaused(false);
-        vm.prank(alice);
-        vault.transfer(bob, 1);
+        vm.prank(bob);
+        vault.deposit(13, 0);
+        assertEq(mining.checkpoints(), 1);
         assertEq(_claim(alice), 10 ether);
+        assertEq(vault.claimableRewards(bob), 0);
+    }
+
+    function testCorePauseWithSettledRoundStillAllowsExitByTransferOrBurnButNotAdmission() public {
+        _twoDepositors();
+        mining.deferCredit(12, 10 ether);
+        core.setPaused(true);
+        vm.prank(alice);
+        vault.transfer(carol, 1000 ether);
+        vm.prank(bob);
+        vault.renounceShares(500 ether);
+        assertEq(mining.checkpoints(), 0);
+        assertEq(vault.balanceOf(carol), 1000 ether);
+        assertEq(vault.balanceOf(bob), 500 ether);
+        _mintNFT(carol, 14, 1);
+        vm.prank(carol);
+        vm.expectRevert(HamsterMiningReserve.CheckpointRequired.selector);
+        vault.deposit(14, 0);
+        vm.prank(owner);
+        vm.expectRevert(HamsterMiningReserve.CheckpointRequired.selector);
+        vault.merge(12, 13, type(uint256).max);
+        core.setPaused(false);
+        vault.harvest();
+        assertEq(vault.totalRewardsReceived(), 0);
+        vm.prank(carol);
+        vault.deposit(14, 0);
+        assertEq(mining.checkpoints(), 1);
+        // The round certified during the pause follows the shares that held it when it was funded.
+        assertEq(vault.claimableRewards(alice), 0);
+        assertApproxEqAbs(vault.claimableRewards(carol), uint256(10 ether) * 2 / 3, 1);
+        assertApproxEqAbs(vault.claimableRewards(bob), uint256(10 ether) / 3, 1);
+        _assertSolvent();
     }
 
     function testVoluntaryBurnGivesUpFutureRewardsAndKeepsAccruedRewards() public {
@@ -278,7 +312,7 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         vm.expectRevert(HamsterMiningReserve.ReserveFull.selector);
         vault.deposit(33, 1);
         vm.prank(owner);
-        vault.merge(32, 31);
+        vault.merge(32, 31, type(uint256).max);
         vm.prank(alice);
         vault.deposit(33, 1);
         assertEq(vault.reserveCount(), 32);
@@ -289,22 +323,22 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         _twoDepositors();
         vm.prank(alice);
         vm.expectRevert(HamsterMiningReserve.OnlyStrategist.selector);
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
         vm.startPrank(owner);
         vm.expectRevert(HamsterMiningReserve.InvalidMerge.selector);
-        vault.merge(12, 12);
+        vault.merge(12, 12, type(uint256).max);
         vm.expectRevert(HamsterMiningReserve.InvalidMerge.selector);
-        vault.merge(12, 99);
+        vault.merge(12, 99, type(uint256).max);
         vm.stopPrank();
         _deposit(carol, 14, 2);
         vm.prank(owner);
         vm.expectRevert(HamsterMiningReserve.InvalidMerge.selector);
-        vault.merge(12, 14);
+        vault.merge(12, 14, type(uint256).max);
         _deposit(carol, 15, 10);
         _deposit(carol, 16, 10);
         vm.prank(owner);
         vm.expectRevert(HamsterMiningReserve.InvalidMerge.selector);
-        vault.merge(15, 16);
+        vault.merge(15, 16, type(uint256).max);
     }
 
     function testMergeCooldownAndPendingActivation() public {
@@ -314,17 +348,17 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         mining.setPosition(12, p);
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(HamsterMiningReserve.MergeCooldown.selector, 100_001, 100_000));
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
         core.setHeight(100_001);
         vm.prank(owner);
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
         _deposit(carol, 14, 2);
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(HamsterMiningReserve.PendingActivation.selector, 12));
-        vault.merge(12, 14);
+        vault.merge(12, 14, type(uint256).max);
         mining.activatePending();
         vm.prank(owner);
-        vault.merge(12, 14);
+        vault.merge(12, 14, type(uint256).max);
         assertEq(vault.totalWeight(), 7000);
     }
 
@@ -333,14 +367,14 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         nft.setFailBurn(true);
         vm.prank(owner);
         vm.expectRevert("burn failed");
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
         assertEq(vault.totalWeight(), 2000);
         assertEq(nft.ownerOf(13), address(vault));
         nft.setFailBurn(false);
         mining.setCorruptMerge(true);
         vm.prank(owner);
         vm.expectRevert(HamsterMiningReserve.InvalidMerge.selector);
-        vault.merge(12, 13);
+        vault.merge(12, 13, type(uint256).max);
         assertEq(vault.reserveCount(), 2);
         assertEq(nft.ownerOf(13), address(vault));
     }
@@ -404,17 +438,68 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         assertEq(vault.claimableRewards(bob), 0);
     }
 
-    function testIdentityUpgradeStopsNewActivityButDoesNotTrapAccountedSQK() public {
-        _deposit(alice, 12, 1);
+    function testIdentityUpgradeStopsMergesButNotHarvestingClaimsOrShareExit() public {
+        _twoDepositors();
         mining.credit(12, 12 ether);
         vault.harvest();
-        mining.setIdentity(7, address(mining));
-        vm.expectRevert(HamsterMiningReserve.UnsupportedImplementation.selector);
-        vault.harvest();
+        mining.setIdentity(7, address(0xBEEF));
+        mining.credit(12, 100 ether);
+        assertEq(vault.pendingMiningRewards(), 100 ether);
+        assertEq(vault.harvest(), 100 ether);
         vm.prank(alice);
+        vault.transfer(carol, 500 ether);
+        vm.prank(alice);
+        vault.renounceShares(100 ether);
+        vm.prank(bob);
+        vault.approve(carol, 1);
+        vm.prank(carol);
+        vault.transferFrom(bob, carol, 1);
+        _mintNFT(carol, 14, 1);
+        vm.prank(carol);
+        vault.deposit(14, 0);
+        assertEq(vault.reserveCount(), 3);
+        vm.prank(owner);
         vm.expectRevert(HamsterMiningReserve.UnsupportedImplementation.selector);
-        vault.transfer(bob, 1);
-        assertEq(_claim(alice), 12 ether);
+        vault.merge(12, 13, type(uint256).max);
+        assertEq(_claim(alice), 56 ether);
+        assertEq(_claim(bob), 56 ether);
+        assertEq(sqk.balanceOf(address(mining)), 0);
+        mining.setIdentity(6, vault.MINING_IMPLEMENTATION());
+        core.setVersion(4);
+        vault.harvest();
+        vm.prank(owner);
+        vm.expectRevert(HamsterMiningReserve.UnsupportedImplementation.selector);
+        vault.merge(12, 13, type(uint256).max);
+        core.setVersion(3);
+        vm.prank(owner);
+        vault.merge(12, 13, type(uint256).max);
+        _assertSolvent();
+    }
+
+    function testMergeSupplyGuardRejectsFrontRunningDepositAndAcceptsUnchangedSupply() public {
+        _twoDepositors();
+        uint256 prepared = vault.totalSupply();
+        _deposit(carol, 14, 1);
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.UnexpectedSupply.selector, 3000 ether, prepared)
+        );
+        vault.merge(12, 13, prepared);
+        assertEq(vault.totalWeight(), 3000);
+        assertEq(vault.reserveLevel(13), 1);
+        uint256 supply12 = vault.totalSupply();
+        vm.prank(owner);
+        vault.merge(12, 13, supply12);
+        assertEq(vault.totalWeight(), 4000);
+        // Burns before the merge only reduce supply and never trip the guard.
+        vm.prank(alice);
+        vault.renounceShares(10 ether);
+        _deposit(alice, 15, 2);
+        _deposit(bob, 16, 2);
+        mining.activatePending();
+        uint256 supply15 = vault.totalSupply();
+        vm.prank(owner);
+        vault.merge(15, 16, supply15);
     }
 
     function testNoAdminCanWithdrawNFTsOrMintShares() public {
@@ -464,18 +549,82 @@ contract HamsterMiningReserveTest is ReserveTestBase {
         vm.stopPrank();
     }
 
-    function testNearTotalVoluntaryBurnCannotTakeANewNFTForZeroShares() public {
+    function testVoluntaryBurnCannotCollapseSupplyBelowPrecisionFloor() public {
         _deposit(alice, 12, 2);
+        uint256 floor = 3000 * vault.MIN_SHARES_PER_WEIGHT();
         vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, 1, floor));
         vault.renounceShares(3000 ether - 1);
-        _mintNFT(bob, 13, 1);
-        assertEq(vault.previewDeposit(13), 0);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, floor - 1, floor)
+        );
+        vault.renounceShares(3000 ether - floor + 1);
+        vm.prank(alice);
+        vault.renounceShares(3000 ether - floor);
+        assertEq(vault.totalSupply(), floor);
+        assertEq(vault.balanceOf(alice), floor);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, floor - 1, floor)
+        );
+        vault.renounceShares(1);
+    }
+
+    function testDepositsAfterMaximalBurnStayExactlyProportionalForEveryLevel() public {
+        _deposit(alice, 12, 3);
+        uint256 burnable = 7000 ether - 7000 * vault.MIN_SHARES_PER_WEIGHT();
+        vm.prank(alice);
+        vault.renounceShares(burnable);
+        assertEq(vault.totalSupply(), 7000 * 1e9);
+        _mintNFT(bob, 13, 4);
+        assertEq(vault.previewDeposit(13), 15000 * 1e9);
         vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(HamsterMiningReserve.MinimumSharesNotMet.selector, 0, 0));
-        vault.deposit(13, 0);
-        assertEq(nft.ownerOf(13), bob);
-        assertEq(vault.totalSupply(), 1);
+        assertEq(vault.deposit(13, 15000 * 1e9), 15000 * 1e9);
+        _mintNFT(carol, 14, 1);
+        assertEq(vault.previewDeposit(14), 1000 * 1e9);
+        vm.prank(carol);
+        assertEq(vault.deposit(14, 1000 * 1e9), 1000 * 1e9);
+        assertEq(vault.totalWeight(), 23000);
+        assertEq(vault.totalSupply(), 23000 * 1e9);
+        mining.credit(12, 7 ether);
+        mining.credit(13, 15 ether);
+        mining.credit(14, 1 ether);
+        vault.harvest();
+        assertEq(_claim(alice), 7 ether);
+        assertEq(_claim(bob), 15 ether);
+        assertEq(_claim(carol), 1 ether);
+        _assertSolvent();
+    }
+
+    function testMergesAfterMaximalBurnKeepEveryLevelDepositableAndBlockFurtherBurns() public {
+        _twoDepositors();
+        uint256 floor = 2000 * vault.MIN_SHARES_PER_WEIGHT();
+        vm.prank(alice);
+        vault.renounceShares(1000 ether - 1);
+        vm.prank(bob);
+        vault.renounceShares(1000 ether + 1 - floor);
+        assertEq(vault.totalSupply(), floor);
+        uint256 supply12 = vault.totalSupply();
+        vm.prank(owner);
+        vault.merge(12, 13, supply12);
         assertEq(vault.totalWeight(), 3000);
+        vm.prank(bob);
+        vm.expectRevert(
+            abi.encodeWithSelector(HamsterMiningReserve.SupplyBelowFloor.selector, floor - 1, 3000 * 1e9)
+        );
+        vault.renounceShares(1);
+        _mintNFT(carol, 14, 1);
+        uint256 quote = vault.previewDeposit(14);
+        assertEq(quote, uint256(1000) * floor / 3000);
+        vm.prank(carol);
+        assertEq(vault.deposit(14, quote), quote);
+        mining.activatePending();
+        mining.credit(12, 3 ether);
+        mining.credit(14, 1 ether);
+        vault.harvest();
+        assertApproxEqAbs(_claim(carol), 1 ether, 1e9);
+        assertApproxEqAbs(_claim(alice) + _claim(bob), 3 ether, 1e9);
     }
 
     function testFuzzProportionalSharesAndRewards(uint8 a, uint8 b, uint96 reward) public {

@@ -15,14 +15,15 @@ security audit.
 | Check | Result |
 | --- | --- |
 | `forge build` | Pass |
-| Default `forge test` | 47 Foundry-reported tests/groups pass: 43 unit/fuzz tests, 3 Graph A replay tests, 1 group containing 3 invariants |
+| Default `forge test` | 52 Foundry-reported tests/groups pass: 48 unit/fuzz tests, 3 Graph A replay tests, 1 group containing 4 invariants |
+| Reviewer proof `Proof_ffd6e6bcb7aa.t.sol` (supply collapse) | Failed on the previous tree, passes on this one |
 | Fuzz functions | 2 functions × 256 runs |
 | Stateful invariant group | 128 runs × 64 actions = 8192 calls; zero reverts; `fail_on_revert = true` |
-| Live Sepolia fork, block 12019224 | 3 tests pass |
+| Live Sepolia fork, block 12019224 | 3 tests; not re-run on this revision (no network on the worker); the shared assertions were re-run offline through the replay |
 | `forge fmt --check` | Pass |
 | `python3 tools/export-abi.py --check` | Pass |
-| Application runtime size | 14,925 bytes, below EIP-170's 24,576 |
-| Application creation code | 15,733 bytes before its one static constructor word |
+| Application runtime size | 15,200 bytes, below EIP-170's 24,576 |
+| Application creation code | 16,008 bytes before its one static constructor word |
 | External library links | None |
 | Constructor with graph code removed | Pass; explicit owner retained and zero share supply |
 | Application runtime escape-opcode scan | Pass; no reachable DELEGATECALL, CALLCODE or SELFDESTRUCT under the protected floor's scan |
@@ -43,21 +44,29 @@ checks, checkpoint-before-share-change, multi-checkpoint backlog, pauses, pendin
 activation, Core-height cooldowns, max-level and malformed merges, failed donor
 burns, claim failures, inaccurate reward reports, false token transfers,
 unauthorized actions, unsolicited NFTs, donations, repeat actions, minimum shares,
-reserve capacity and voluntary burns including near-zero supply.
+reserve capacity, the voluntary-burn floor (exact boundary, exact proportional
+deposits of every level after a maximal burn, merges after a maximal burn),
+the merge `maxSupply` guard against a front-running deposit, exits during a Core
+pause, and a Mining identity change that stops merges but not harvesting,
+deposits, transfers, burns or claims.
 
 `AccessAndReentrancy.t.sol` covers explicit ownership under factory-style
 construction, no constructor dependency reads, activation authorization and
 one-shot behavior, chain/version/implementation/wiring/level/token failures,
 proxy identity versus a spoofed implementation self-report, Ownable2Step,
-strategist rotation, reentry from ERC-721 transfers and SQK collection/payout,
-absence of owner asset extraction, and the protected runtime size/opcode floor.
+strategist rotation, refusal of `renounceOwnership` before activation, reentry
+from ERC-721 transfers and SQK collection/payout, absence of owner asset
+extraction, and the protected runtime size/opcode floor.
 
 `ReserveInvariant.t.sol` interleaves deposits with carried credit, new rewards,
-harvests, arbitrary partial transfers, claims, voluntary burns and valid merges
-across three holders. It checks physical SQK conservation, claim backing,
-share/balance conservation, permanent custody, sorted unique live IDs, levels and
-tracked final weight after every action. Its handler avoids deliberately invalid
-capacity/rounding operations; dedicated failure tests cover those operations.
+harvests, arbitrary partial transfers, claims, voluntary burns (including burns
+exactly to the floor) and valid merges across three holders. It checks physical
+SQK conservation, claim backing, share/balance conservation, permanent custody,
+sorted unique live IDs, levels, tracked final weight and that supply never falls
+below 1e7 share units per weight unit after every action. Deposits in the
+handler have no rounding guard: every level must remain depositable after any
+sequence. The handler avoids only the deliberate capacity limit; dedicated
+failure tests cover it.
 
 `GraphAAssertions.sol` is shared by the live-fork and offline-replay tests. It
 checks the exact historical amount and NFT supply figures, the selector and ABI

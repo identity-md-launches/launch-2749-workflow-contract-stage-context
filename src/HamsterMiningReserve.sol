@@ -28,6 +28,10 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
     // A full claim must fit in one external batch on every balance/supply change.
     uint256 public constant MAX_RESERVE_NFTS = 32;
     uint256 public constant INITIAL_SHARES_PER_WEIGHT = 1e18;
+    /// @notice Voluntary burns may not leave fewer share units per final weight unit than this.
+    /// @dev Keeps deposit pricing floor(w*S/W) precise to about 1e-9, so a dominant holder cannot
+    /// collapse supply and lock out or under-mint later depositors. Never binding without burns.
+    uint256 public constant MIN_SHARES_PER_WEIGHT = 1e9;
     uint256 public constant REWARD_PRECISION = 1e36;
 
     IERC20 public rewardToken;
@@ -67,6 +71,8 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
     error CheckpointRequired();
     error InvalidRewardPayment();
     error InvalidExit();
+    error SupplyBelowFloor(uint256 remainingSupply, uint256 minimumSupply);
+    error UnexpectedSupply(uint256 actualSupply, uint256 maximumSupply);
     error InvalidShareRecipient();
 
     event Activated(address indexed rewardToken);
@@ -120,6 +126,13 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
         strategist = newStrategist;
     }
 
+    /// @notice Ownership can be renounced only once the vault is activated; before that it would
+    /// make activation, and therefore the whole vault, permanently unreachable.
+    function renounceOwnership() public override onlyOwner {
+        _requireActive();
+        super.renounceOwnership();
+    }
+
     /// @notice Permanently contribute one live, fully activated Genesis NFT owned by the caller.
     /// @param minShares Minimum shares accepted; protects against a preceding merge or burn.
     /// @dev Historical funded SQK carried by this NFT is credited only to the depositor.
@@ -129,7 +142,7 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
             revert InvalidDeposit();
         }
         if (_liveIds.length == MAX_RESERVE_NFTS) revert ReserveFull();
-        _prepareShareChange();
+        _prepareShareChange(false);
         IGraphAMining.Position memory pos = IGraphAMining(MINING).position(COLLECTION, tokenId);
         uint256 weight = _settledWeight(tokenId, pos);
         uint256 supply = totalSupply();
@@ -158,14 +171,20 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
 
     /// @notice Strategist combines equal levels. The donor is burned by Mining, never withdrawn.
     /// @dev Final weight rises by 1000 immediately for share pricing; active weight rises later.
-    function merge(uint256 survivorId, uint256 donorId) external nonReentrant {
+    /// Mining must still be the pinned v6 implementation: merging is the one call that changes positions.
+    /// @param maxSupply Reverts if share supply exceeds it, so a deposit ordered just before this
+    /// merge cannot take part of the bonus; pass the supply observed when the merge was prepared.
+    function merge(uint256 survivorId, uint256 donorId, uint256 maxSupply) external nonReentrant {
         if (msg.sender != strategist) revert OnlyStrategist();
         _requireActive();
+        _validateIdentity();
+        uint256 supply = totalSupply();
+        if (supply > maxSupply) revert UnexpectedSupply(supply, maxSupply);
         uint8 level = reserveLevel[survivorId];
         if (survivorId == donorId || level == 0 || level != reserveLevel[donorId] || level >= MAX_LEVELS) {
             revert InvalidMerge();
         }
-        _prepareShareChange();
+        _prepareShareChange(false);
         IGraphAMining.Position memory survivor = IGraphAMining(MINING).position(COLLECTION, survivorId);
         IGraphAMining.Position memory donor = IGraphAMining(MINING).position(COLLECTION, donorId);
         uint256 combined = _settledWeight(survivorId, survivor) + _settledWeight(donorId, donor);
@@ -191,10 +210,11 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
     }
 
     /// @notice Anyone can collect already-funded Mining rewards for every live reserve NFT.
-    /// @dev Does not require Core to be unpaused. Checkpoint Mining separately to fund new rounds.
+    /// @dev Does not require Core to be unpaused or Mining to keep its pinned identity: only SQK
+    /// physically received, matching Mining's reported payment, is distributed. Checkpoint Mining
+    /// separately to fund new rounds.
     function harvest() external nonReentrant returns (uint256 amount) {
         _requireActive();
-        _validateIdentity();
         amount = _harvest();
     }
 
@@ -212,18 +232,24 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
     }
 
     /// @notice Voluntarily abandon future rewards; NFTs stay in the reserve and accrued SQK stays claimable.
-    /// @dev Burning the entire supply is prohibited to prevent a later first depositor taking the reserve.
-    /// Ordinary exit is transfer/transferFrom to a willing recipient, including one's whole balance.
+    /// @dev Burning the entire supply is prohibited to prevent a later first depositor taking the reserve,
+    /// and the remaining supply must keep at least MIN_SHARES_PER_WEIGHT units per final weight unit so
+    /// later deposits are still priced precisely. Ordinary exit is transfer/transferFrom to a willing
+    /// recipient, including one's whole balance.
     function renounceShares(uint256 shares) external nonReentrant {
-        if (shares == 0 || shares >= totalSupply()) revert InvalidExit();
-        _prepareShareChange();
+        uint256 supply = totalSupply();
+        if (shares == 0 || shares >= supply) revert InvalidExit();
+        uint256 remaining = supply - shares;
+        uint256 minimum = totalWeight * MIN_SHARES_PER_WEIGHT;
+        if (remaining < minimum) revert SupplyBelowFloor(remaining, minimum);
+        _prepareShareChange(true);
         _burn(msg.sender, shares);
         emit SharesRenounced(msg.sender, shares);
     }
 
     function transfer(address to, uint256 value) public override nonReentrant returns (bool) {
         if (to == address(this)) revert InvalidShareRecipient();
-        if (value != 0 && to != msg.sender) _prepareShareChange();
+        if (value != 0 && to != msg.sender) _prepareShareChange(true);
         return super.transfer(to, value);
     }
 
@@ -234,7 +260,7 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
         returns (bool)
     {
         if (to == address(this)) revert InvalidShareRecipient();
-        if (value != 0 && to != from) _prepareShareChange();
+        if (value != 0 && to != from) _prepareShareChange(true);
         return super.transferFrom(from, to, value);
     }
 
@@ -314,14 +340,20 @@ contract HamsterMiningReserve is ERC20, Ownable2Step, ReentrancyGuard, IERC721Re
         if (implementation != MINING_IMPLEMENTATION) revert UnsupportedImplementation();
     }
 
-    function _prepareShareChange() private {
+    /// @dev Advances funded rounds and claims every live NFT before shares move, so already-certified
+    /// rewards cannot follow new or transferred shares. Identity is deliberately not re-pinned here:
+    /// a Mining upgrade must not strand the reserve's SQK or block the share-transfer exit.
+    /// @param exit True for transfers and burns between existing holders. While Core is paused nobody
+    /// can checkpoint, so exits proceed on funded state alone and only admissions (deposit, merge) wait.
+    function _prepareShareChange(bool exit) private {
         _requireActive();
-        _validateIdentity();
-        (,, bool settled) = IGraphAMining(MINING).checkpointStatus();
+        (bool corePaused,, bool settled) = IGraphAMining(MINING).checkpointStatus();
         if (settled) {
-            IGraphAMining(MINING).checkpoint();
-            (,, settled) = IGraphAMining(MINING).checkpointStatus();
-            if (settled) revert CheckpointRequired();
+            if (!corePaused) {
+                IGraphAMining(MINING).checkpoint();
+                (,, settled) = IGraphAMining(MINING).checkpointStatus();
+            }
+            if (settled && !(exit && corePaused)) revert CheckpointRequired();
         }
         _harvest();
     }

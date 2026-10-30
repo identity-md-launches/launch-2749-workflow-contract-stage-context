@@ -129,6 +129,19 @@
   },
   {
     "type": "function",
+    "name": "MIN_SHARES_PER_WEIGHT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "NFT",
     "inputs": [],
     "outputs": [
@@ -372,6 +385,11 @@
       },
       {
         "name": "donorId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxSupply",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1311,8 +1329,40 @@
   },
   {
     "type": "error",
+    "name": "SupplyBelowFloor",
+    "inputs": [
+      {
+        "name": "remainingSupply",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minimumSupply",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "UnexpectedNFT",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedSupply",
+    "inputs": [
+      {
+        "name": "actualSupply",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximumSupply",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

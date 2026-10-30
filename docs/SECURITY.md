@@ -32,6 +32,11 @@ currently certified work (or the transaction reverts if one bounded checkpoint
 is insufficient). Every tracked live NFT is then claimed in ascending order.
 This prevents selectively unharvested funded rewards from following newly minted
 or transferred shares. Incoming NFT credit is collected separately for its owner.
+While Core is paused no checkpoint is possible: deposits and merges then revert
+`CheckpointRequired`, so nobody can buy into a certified-but-unfunded round, but
+transfers and burns between existing holders proceed on funded state so the exit
+stays live. The identity pin is not re-checked on these paths; `_collect`'s
+balance-delta equality is the safety property they rely on.
 
 Rewards use a cumulative index at precision 1e36. Each holder is accrued before
 its balance changes. Whole rewards and fractional remainders stay with the holder
@@ -51,9 +56,16 @@ tracked weight = sum(1000*(2**level - 1) for live reserve NFTs)
 Donations increase the physical balance without creating a liability. Per-claim
 and per-distribution dust remains in the system. The final share supply cannot
 be burned, preventing a reset that lets a later depositor capture old NFTs.
-Voluntary burns can leave a very small supply, making later deposits round to
-zero; those deposits fail rather than accepting an NFT for no shares. Transfer
-remains the ordinary full exit.
+Voluntary burns must also leave `S >= W * MIN_SHARES_PER_WEIGHT` (1e9 units per
+weight unit). `S/W` is non-increasing under every state change, so without the
+floor a dominant holder could burn to a few base units at no cost and make every
+later quote `floor(w*S/W)` round to zero (lockout) or far below the weight share
+(permanent skew in its own favour). With the floor the worst reachable ratio is
+about 3e7 units per weight unit (floor, then every possible merge), so quotes stay
+accurate to better than one part in 1e7 and no level can be locked out. Transfer
+remains the ordinary full exit. Merges check `totalSupply() <= maxSupply` so a
+deposit ordered in front of a merge reverts the merge instead of sharing the
+bonus; burns lower supply and never trip the guard.
 
 ## External calls and bounded work
 
@@ -90,22 +102,36 @@ inputs or externally linked library.
    can change before that work is certified. Allocation follows available
    certified/funded state, not retrospective time-weighted NFT ownership.
 4. **External control:** Graph A governance/reporters can stop or alter settlement.
-   The current Mining proxy's implementation is pinned, Core must advertise v3,
-   and the SQK token is pinned on activation. A graph upgrade can freeze share
-   movement and harvesting; accounted SQK can still be claimed. There is no
+   The current Mining proxy's implementation is pinned and Core must advertise v3
+   for `activate()` and `merge()`; the SQK token is pinned on activation. A graph
+   upgrade therefore freezes merging only. Harvesting, deposits, transfers and
+   burns keep working on any Mining whose `claim` pays the vault exactly what it
+   reports, so an upgrade cannot strand funded or future SQK or block the exit.
+   A Mining whose `claim` reverts blocks share changes (they claim first) until
+   it works again; accounted SQK stays claimable. There is no owner re-pin,
    migration or emergency NFT withdrawal. Review the permanent-custody choice.
-5. **Liveness and capacity:** share changes need full funded settlement. A large
-   checkpoint backlog requires permissionless direct Mining calls before retry.
-   The fixed 32-live-NFT limit bounds gas and limits admission until merges free
-   slots. Review worst-case activation/checkpoint gas on the service's simulation.
+5. **Liveness and capacity:** deposits and merges need full funded settlement. A
+   large checkpoint backlog requires permissionless direct Mining calls before
+   retry. During a Core pause transfers and burns proceed without a checkpoint;
+   the round certified during the pause follows the shares. The fixed
+   32-live-NFT limit bounds gas and limits admission until merges free slots.
+   Review worst-case activation/checkpoint gas on the service's simulation.
 6. **Direct transfers:** unsafe NFT transfers and unrelated token donations are
    unrecoverable and mint no shares. No administrator receives a rescue privilege.
-7. **Supply rounding:** burns are voluntary without principal redemption. Leaving
-   only a few base share units can reject later zero-share deposit quotes.
+7. **Supply floor:** burns are voluntary without principal redemption and cannot
+   take supply under `totalWeight * 1e9`. Once merges have pushed the ratio under
+   the floor, further burns are refused and transfer is the only exit. Deposits
+   and merges alone never reach the floor.
 8. **Deployment/manifest authorization:** one `address owner_` argument must be
    `$owner`. No factory/IMD role, proxy, initializer-by-factory, dynamic constructor
    argument, linked bytecode or payable constructor is needed. Owner activation
    occurs after launch; the deployer is not the operator.
+9. **Merge ordering:** `merge` takes `maxSupply`; the strategist passes the
+   supply it prepared against so a front-running deposit reverts the merge. A
+   strategist passing `type(uint256).max` opts out of that protection.
+10. **Ownership renunciation:** refused before activation. After activation it
+    is irreversible and leaves the last strategist in place; ownership transfer
+    does not rotate the strategist, which the new owner must do explicitly.
 
 No fee, royalty, treasury, relayer key, randomness service or price oracle is
 introduced. There are no transactions to sign or broadcast in this contribution.

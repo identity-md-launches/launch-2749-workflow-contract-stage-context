@@ -55,8 +55,9 @@ abstract contract GraphAAssertions is Test {
         assertEq(vault.totalSupply(), 2000 ether);
         assertEq(nft.ownerOf(12), address(vault));
         assertEq(nft.ownerOf(13), address(vault));
+        uint256 supply = vault.totalSupply();
         vm.prank(governor);
-        vault.merge(12, 13);
+        vault.merge(12, 13, supply);
         assertEq(vault.totalWeight(), 3000);
         assertEq(vault.reserveCount(), 1);
         assertEq(nft.totalSupply(), supplyBefore - 1);
@@ -105,10 +106,11 @@ abstract contract GraphAAssertions is Test {
         address who13 = nft.ownerOf(13);
         _depositReal(who12, 12);
         _depositReal(who13, 13);
+        uint256 supply = vault.totalSupply();
         vm.expectRevert(HamsterMiningReserve.OnlyStrategist.selector);
-        vault.merge(12, 13);
+        vault.merge(12, 13, supply);
         vm.prank(governor);
-        vault.merge(12, 13);
+        vault.merge(12, 13, supply);
         vm.expectRevert();
         mining.claimable(0, ids);
         assertEq(vault.pendingMiningRewards(), 0);
